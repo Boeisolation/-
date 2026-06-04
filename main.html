@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>牛熊位置监测台 · Condition / Trigger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0c0e0d; --ink2:#14110f; --panel:#16130f; --line:#2a241c;
+    --paper:#e7e1d4; --paper-dim:#9a9183; --paper-faint:#6b6457;
+    --gold:#e0a93c; --gold-dim:#8a6c2a;
+    --red:#d9483b; --amber:#e0a93c; --green:#3f9a6e;
+    --red-bg:rgba(217,72,59,.12); --amber-bg:rgba(224,169,60,.12); --green-bg:rgba(63,154,110,.12);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(224,169,60,.06), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(63,154,110,.05), transparent 55%),
+      var(--ink);
+    color:var(--paper); font-family:"IBM Plex Mono",monospace; line-height:1.5;
+    padding:clamp(16px,4vw,48px); min-height:100vh;
+  }
+  body::before{ /* grain */
+    content:"";position:fixed;inset:0;pointer-events:none;opacity:.035;z-index:0;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .wrap{max-width:1120px;margin:0 auto;position:relative;z-index:1}
+
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:28px}
+  .kicker{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--gold);margin-bottom:10px}
+  h1{font-family:"Fraunces",serif;font-weight:600;font-size:clamp(26px,5vw,42px);line-height:1.05;letter-spacing:-.01em}
+  h1 em{font-style:italic;color:var(--gold)}
+  .sub{color:var(--paper-dim);font-size:13px;margin-top:10px;max-width:62ch}
+
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 4px}
+  .mkt{display:flex;gap:6px;background:var(--ink2);border:1px solid var(--line);border-radius:10px;padding:4px}
+  .mkt button{background:none;border:none;color:var(--paper-dim);font-family:inherit;font-size:12px;padding:7px 13px;border-radius:7px;cursor:pointer;transition:.2s}
+  .mkt button.on{background:var(--gold);color:#1a1407;font-weight:600}
+  .mkt button:hover:not(.on){color:var(--paper)}
+  .mkt-note{font-size:12px;color:var(--paper-faint);flex:1;min-width:200px}
+
+  /* verdict */
+  .verdict{display:grid;grid-template-columns:1.05fr .95fr;gap:22px;margin:26px 0 34px;align-items:stretch}
+  @media(max-width:760px){.verdict{grid-template-columns:1fr}}
+  .vcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;position:relative;overflow:hidden}
+  .vcard .lab{font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:var(--paper-faint);margin-bottom:14px}
+  .vstate{font-family:"Fraunces",serif;font-size:clamp(22px,3.5vw,30px);font-weight:600;line-height:1.1;margin-bottom:12px}
+  .vmove{font-size:13px;color:var(--paper-dim);line-height:1.7}
+  .counts{display:flex;gap:24px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+  .count .n{font-size:30px;font-weight:600}
+  .count .c{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--paper-faint)}
+
+  /* quadrant */
+  .quad{aspect-ratio:1/.92;position:relative;border:1px solid var(--line);border-radius:16px;background:var(--ink2);padding:34px 14px 14px 34px}
+  .quad .axlabel{position:absolute;font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--paper-faint)}
+  .axlabel.top{top:11px;left:50%;transform:translateX(-50%)}
+  .axlabel.left{left:9px;top:50%;transform:translateY(-50%) rotate(180deg);writing-mode:vertical-rl}
+  .qgrid{height:100%;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px}
+  .qcell{border:1px dashed var(--line);border-radius:9px;padding:11px;display:flex;flex-direction:column;justify-content:flex-start;transition:.3s}
+  .qcell .qt{font-size:11px;color:var(--paper-faint);line-height:1.35}
+  .qcell.active{border-style:solid;border-color:var(--gold);background:linear-gradient(180deg,rgba(224,169,60,.14),rgba(224,169,60,.04))}
+  .qcell.active.danger{border-color:var(--red);background:linear-gradient(180deg,var(--red-bg),transparent)}
+  .qcell.active .qt{color:var(--paper)}
+  .qtip{font-size:8.5px;letter-spacing:.06em}
+
+  /* layers */
+  .layer-h{display:flex;align-items:baseline;gap:14px;margin:30px 0 14px}
+  .layer-h h2{font-family:"Fraunces",serif;font-size:21px;font-weight:600}
+  .layer-h .tag{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--paper-faint)}
+  .layer-h .hint{font-size:12px;color:var(--paper-faint)}
+
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}}
+  .ind{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:12px;padding:16px 16px 14px;transition:border-color .3s;opacity:0;transform:translateY(8px);animation:rise .5s forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .ind.red{border-left-color:var(--red)} .ind.amber{border-left-color:var(--amber)} .ind.green{border-left-color:var(--green)}
+  .ind .top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:11px}
+  .ind .nm{font-size:14px;font-weight:600}
+  .ind .nm small{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--paper-faint);font-weight:400;margin-top:2px}
+  .dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(0,0,0,.25)}
+  .dot.red{background:var(--red);box-shadow:0 0 10px 1px var(--red)} .dot.amber{background:var(--amber);box-shadow:0 0 10px 1px var(--amber)} .dot.green{background:var(--green);box-shadow:0 0 10px 1px var(--green)}
+  .opts{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+  .opt{display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;transition:.18s;font-size:11.5px;color:var(--paper-dim)}
+  .opt:hover{border-color:var(--paper-faint)}
+  .opt input{display:none}
+  .opt .pip{width:9px;height:9px;border-radius:50%;margin-top:4px;flex-shrink:0;border:1px solid currentColor}
+  .opt.r{color:var(--red)} .opt.a{color:var(--amber)} .opt.g{color:var(--green)}
+  .opt .txt{color:var(--paper-dim)}
+  .opt.sel{background:var(--ink2);border-color:currentColor}
+  .opt.sel .pip{background:currentColor}
+  .opt.sel .txt{color:var(--paper)}
+  .reading{width:100%;background:var(--ink);border:1px solid var(--line);border-radius:7px;color:var(--paper);font-family:inherit;font-size:11.5px;padding:7px 9px}
+  .reading::placeholder{color:var(--paper-faint)}
+  .reading:focus{outline:none;border-color:var(--gold-dim)}
+
+  /* history */
+  .hist{margin-top:36px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}
+  .hist .hh{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+  .hist h2{font-family:"Fraunces",serif;font-size:20px;font-weight:600}
+  .btn{background:var(--gold);color:#1a1407;border:none;font-family:inherit;font-weight:600;font-size:12px;padding:9px 16px;border-radius:9px;cursor:pointer;transition:.2s}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:none;border:1px solid var(--line);color:var(--paper-dim)}
+  .btn.ghost:hover{border-color:var(--paper-faint);color:var(--paper)}
+  .spark{width:100%;height:140px;margin:8px 0 16px}
+  .legend{display:flex;gap:18px;font-size:11px;color:var(--paper-dim);margin-bottom:6px}
+  .legend i{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:6px}
+  .snaps{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto}
+  .snap{display:grid;grid-template-columns:auto 1fr 1fr auto;gap:12px;align-items:center;font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;color:var(--paper-dim)}
+  .snap .d{color:var(--paper);font-weight:500}
+  .snap .x{cursor:pointer;color:var(--paper-faint);border:none;background:none;font-family:inherit;font-size:14px}
+  .snap .x:hover{color:var(--red)}
+  .empty{font-size:12px;color:var(--paper-faint);padding:14px 0;text-align:center}
+  footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);font-size:11px;color:var(--paper-faint);line-height:1.7}
+  footer b{color:var(--paper-dim);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Condition · Trigger 双层框架</div>
+    <h1>牛熊位置<em>监测台</em></h1>
+    <p class="sub">每周照着读数选灯,自动判断你落在四宫格的哪一格。这是<b style="color:var(--paper-dim)">风控姿态工具,不是择时神器</b>——条件红灯只代表"该保守",真正动手要等扳机翻转。</p>
+    <div class="toolbar">
+      <div class="mkt" id="mkt">
+        <button data-m="us" class="on">美股</button>
+        <button data-m="nky">日经</button>
+        <button data-m="hsi">恒生</button>
+      </div>
+      <div class="mkt-note" id="mktNote"></div>
+    </div>
+  </header>
+
+  <section class="verdict">
+    <div class="vcard">
+      <div class="lab">当前判读</div>
+      <div class="vstate" id="vState">—</div>
+      <div class="vmove" id="vMove">选择各指标的灯,结论会自动更新。</div>
+      <div class="counts">
+        <div class="count"><div class="n" id="cCond">0<span style="font-size:15px;color:var(--paper-faint)">/4</span></div><div class="c">条件层 红灯</div></div>
+        <div class="count"><div class="n" id="cTrig">0<span style="font-size:15px;color:var(--paper-faint)">/4</span></div><div class="c">扳机层 红灯</div></div>
+      </div>
+    </div>
+    <div class="quad">
+      <div class="axlabel top">扳机层 →（静 · 动）</div>
+      <div class="axlabel left">条件层 →（冷 · 热）</div>
+      <div class="qgrid">
+        <div class="qcell" data-q="hot-calm"><div class="qt"><b>贵但仍在趋势中</b><div class="qtip">持有 · 停加杠杆 · 收紧止损 · 不追高</div></div></div>
+        <div class="qcell" data-q="hot-active"><div class="qt"><b>风险兑现</b><div class="qtip">按预设规则减仓 / 上对冲</div></div></div>
+        <div class="qcell" data-q="cold-calm"><div class="qt"><b>低风险 / 正常</b><div class="qtip">维持。若紧接暴跌+极便宜=见底区,反向剧本</div></div></div>
+        <div class="qcell" data-q="cold-active"><div class="qt"><b>健康回调 / 噪声</b><div class="qtip">多为噪声,维持仓位</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="layer-h">
+    <h2>条件指标</h2><span class="tag">慢变量 · 定姿态</span>
+    <span class="hint">红灯越多 → 越该保守。但本身不构成卖出理由。</span>
+  </div>
+  <div class="grid" id="condGrid"></div>
+
+  <div class="layer-h">
+    <h2>扳机指标</h2><span class="tag">快变量 · 定时点</span>
+    <span class="hint">条件已红 + 扳机 ≥2 项翻红 → 才执行减仓。</span>
+  </div>
+  <div class="grid" id="trigGrid"></div>
+
+  <section class="hist">
+    <div class="hh">
+      <h2>历史快照</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="saveBtn">保存本周快照</button>
+        <button class="btn ghost" id="clearBtn">清空</button>
+      </div>
+    </div>
+    <div class="legend"><span><i style="background:var(--red)"></i>条件层红灯数</span><span><i style="background:var(--gold)"></i>扳机层红灯数</span></div>
+    <svg class="spark" id="spark" preserveAspectRatio="none"></svg>
+    <div class="snaps" id="snaps"><div class="empty">还没有快照。填好本周读数后点"保存本周快照"。</div></div>
+  </section>
+
+  <footer>
+    <b>三条铁律：</b>① 阈值是"区间"不是"线"；② 持续性 &gt; 单周读数（连续 2–3 周的极端才算数）；③ 单一绿灯别加杠杆,单一红灯别清仓。<br>
+    数据需你手动填入（来源见监测清单）。本面板只做判读与留痕,不替你做交易决定。快照存于本工具,清除聊天不影响。
+  </footer>
+</div>
+
+<script>
+const INDICATORS = [
+  {id:'val', layer:'condition', name:'估值', en:'Valuation',
+    opts:{
+      red:'极端贵：标普 CAPE&gt;37 或前瞻PE&gt;22；日经前瞻PE&gt;20',
+      amber:'偏高：CAPE 30–37 / 前瞻PE 18–22',
+      green:'合理或便宜：CAPE&lt;30；恒生 PE&lt;11 或 PB&lt;1'
+    }, mkt:{
+      nky:{red:'极端贵：日经前瞻PE&gt;20（常态~14–16）',amber:'偏高：前瞻PE 17–20',green:'合理：前瞻PE&lt;17'},
+      hsi:{red:'罕见——恒生通常便宜,估值极少是它的红灯',amber:'PE 11–14 / 接近历史中枢',green:'便宜（多数时间）：PE&lt;11 或 PB&lt;1 = 价值/见底区'}
+    }, def:'red', note:'CAPE 40.7 / 前瞻PE~21'},
+
+  {id:'con', layer:'condition', name:'集中度', en:'Concentration',
+    opts:{
+      red:'领涨极窄：前十大权重&gt;30%（当下~40%）/ 等权大幅跑输市值权',
+      amber:'权重 20–30% / 略有收窄',
+      green:'上涨面宽：前十大&lt;20% / 等权跟得上'
+    }, mkt:{
+      nky:{red:'少数高价股（优衣库/爱德万/软银）主导指数涨跌',amber:'集中但未极端',green:'涨幅分散'},
+      hsi:{red:'腾讯/阿里/美团+金融高度主导',amber:'集中但分散在两三个板块',green:'多板块齐涨'}
+    }, def:'red', note:'前十大 ~40%（纪录）'},
+
+  {id:'lev', layer:'condition', name:'杠杆', en:'Leverage',
+    opts:{
+      red:'融资余额同比&gt;+25% 且近历史峰值 / 融资余额-GDP 创高',
+      amber:'融资余额同比 +10~25%',
+      green:'融资余额同比&lt;+10% 或在下降'
+    }, mkt:{
+      nky:{red:'JPX 信用买残快速攀升',amber:'信用买残温和上升',green:'信用买残平稳/下降'},
+      hsi:{red:'孖展(margin)余额飙升 / 卖空比极低',amber:'中性',green:'去杠杆中'}
+    }, def:'red', note:'融资 +36%YoY,融资/GDP 4.09 纪录'},
+
+  {id:'pos', layer:'condition', name:'仓位 / 资金流', en:'Positioning',
+    opts:{
+      red:'满仓：BofA FMS 现金&lt;4% / 单一题材资金疯狂涌入',
+      amber:'现金 4~5% / 资金流中性',
+      green:'悲观：现金&gt;5% / 资金在流出'
+    }, mkt:{
+      hsi:{red:'南向资金单边疯狂涌入单一题材',amber:'南向中性',green:'南向净流出（悲观）'},
+      nky:{red:'外资单边大举买入日股',amber:'外资中性',green:'外资净卖出'}
+    }, def:'amber', note:'FMS 现金未知 → 暂中性'},
+
+  {id:'sen', layer:'trigger', name:'情绪', en:'Sentiment',
+    opts:{
+      red:'全民亢奋：AAII 多头&gt;55% 持续2-3周 / Fear&amp;Greed&gt;90 后掉头',
+      amber:'偏乐观但未到极端',
+      green:'中性或偏悲观（怀疑者未投降）'
+    }, mkt:{
+      nky:{red:'日经VI 极低 + 资金狂热,媒体一致看多',amber:'偏乐观',green:'谨慎/分歧'},
+      hsi:{red:'南向/散户由观望转一致追入',amber:'分歧',green:'普遍悲观（常态）'}
+    }, def:'green', note:'AAII 多35.6% &lt; 空41.9%'},
+
+  {id:'bre', layer:'trigger', name:'广度', en:'Breadth',
+    opts:{
+      red:'负背离：指数创新高但"200日线上方占比"低于前高 / 跌破50%',
+      amber:'走平 / 小幅背离',
+      green:'健康：创新高且占比同步走高'
+    }, def:'amber', note:'200日线占比 待填（每周自查 $SPXA200R）'},
+
+  {id:'prc', layer:'trigger', name:'价格结构', en:'Price',
+    opts:{
+      red:'放量跌破 200 日均线 / 龙头跌破关键支撑',
+      amber:'跌破 50 日线但守住 200 日线',
+      green:'守在均线之上 / 趋势完好'
+    }, def:'green', note:'纳指/标普100 历史高位'},
+
+  {id:'vol', layer:'trigger', name:'波动率', en:'Volatility',
+    opts:{
+      red:'体制切换：VIX / 日经VI / VHSI 从低位跳升并维持',
+      amber:'单日脉冲后回落',
+      green:'低位平稳'
+    }, def:'amber', note:'VIX ~16（偏自满,未切换）'}
+];
+
+let market='us';
+const MKT_NOTES={
+  us:'美股 = 贵+拥挤+动量市,这套"见顶"框架的原型,直接适用。',
+  nky:'日经 = 高位动量市,但叠加日元/BOJ 这个凌驾性变量——一次政策转向可盖过所有情绪灯。',
+  hsi:'⚠ 恒生 = 便宜+被低配+资金/政策市。它的主风险是价值陷阱,不是"euphoric 见顶"。这套表对恒生更多用在【见底端】,别傻等贪婪顶。'
+};
+
+const state={};
+INDICATORS.forEach(i=>state[i.id]=i.def);
+
+function optClass(k){return k==='red'?'r':k==='amber'?'a':'g'}
+function optText(ind,k){ const m=ind.mkt&&ind.mkt[market]&&ind.mkt[market][k]; return m||ind.opts[k]; }
+
+function renderGrid(){
+  ['condition','trigger'].forEach(layer=>{
+    const host=document.getElementById(layer==='condition'?'condGrid':'trigGrid');
+    host.innerHTML='';
+    INDICATORS.filter(i=>i.layer===layer).forEach((ind,idx)=>{
+      const card=document.createElement('div');
+      card.className='ind '+state[ind.id];
+      card.style.animationDelay=(idx*60)+'ms';
+      card.innerHTML=`
+        <div class="top">
+          <div class="nm">${ind.name}<small>${ind.en}</small></div>
+          <div class="dot ${state[ind.id]}"></div>
+        </div>
+        <div class="opts">
+          ${['red','amber','green'].map(k=>`
+            <label class="opt ${optClass(k)} ${state[ind.id]===k?'sel':''}" data-id="${ind.id}" data-k="${k}">
+              <span class="pip"></span><span class="txt">${optText(ind,k)}</span>
+            </label>`).join('')}
+        </div>
+        <input class="reading" data-id="${ind.id}" placeholder="本周读数（可选）" value="${ind._note||ind.note||''}">
+      `;
+      host.appendChild(card);
+    });
+  });
+  document.querySelectorAll('.opt').forEach(o=>o.addEventListener('click',()=>{
+    state[o.dataset.id]=o.dataset.k; renderGrid(); computeVerdict();
+  }));
+  document.querySelectorAll('.reading').forEach(r=>r.addEventListener('input',()=>{
+    const ind=INDICATORS.find(i=>i.id===r.dataset.id); ind._note=r.value;
+  }));
+}
+
+function computeVerdict(){
+  const cond=INDICATORS.filter(i=>i.layer==='condition');
+  const trig=INDICATORS.filter(i=>i.layer==='trigger');
+  const condRed=cond.filter(i=>state[i.id]==='red').length;
+  const trigRed=trig.filter(i=>state[i.id]==='red').length;
+  document.getElementById('cCond').innerHTML=condRed+'<span style="font-size:15px;color:var(--paper-faint)">/4</span>';
+  document.getElementById('cTrig').innerHTML=trigRed+'<span style="font-size:15px;color:var(--paper-faint)">/4</span>';
+
+  const hot=condRed>=2, active=trigRed>=2;
+  let q,stateTxt,move,danger=false;
+  if(hot&&!active){q='hot-calm';stateTxt='贵但仍在趋势中';move='风险水位高,但还没兑现。<b style="color:var(--paper)">动作：持有,停止加杠杆,收紧止损,坚决不追高。</b>不要因为"怕踏空"上杠杆,也不要因为"看着贵"就清仓。';}
+  else if(hot&&active){q='hot-active';danger=true;stateTxt='风险兑现中';move='高估值遇上扳机翻转——这是真信号。<b style="color:var(--paper)">动作：按你预先写好的规则减仓 / 上对冲。</b>此刻最忌临时改规则、抱侥幸。';}
+  else if(!hot&&!active){q='cold-calm';stateTxt='低风险 / 正常';move='不拥挤、不动荡。维持仓位即可。<b style="color:var(--paper)">特例：</b>若这是紧接一轮暴跌、且估值极便宜,则是投降式<b style="color:var(--paper)">见底区</b>,该用反向(加仓)剧本——恒生历史上多在此格。';}
+  else{q='cold-active';stateTxt='健康回调 / 噪声';move='估值不极端却有扳机异动,多半是普通回调或噪声。维持仓位,别被一两天波动吓出局。';}
+
+  document.getElementById('vState').textContent=stateTxt;
+  document.getElementById('vState').style.color=danger?'var(--red)':'var(--gold)';
+  document.getElementById('vMove').innerHTML=move;
+  document.querySelectorAll('.qcell').forEach(c=>{
+    c.classList.toggle('active',c.dataset.q===q);
+    c.classList.toggle('danger',c.dataset.q===q&&danger);
+  });
+
+  // partial-trigger watch hint
+  if(hot&&trigRed===1){
+    document.getElementById('vMove').innerHTML+=' <span style="color:var(--amber)">（扳机已亮 1 盏——进入观察,再亮 1 盏即行动。）</span>';
+  }
+  return {condRed,trigRed};
+}
+
+/* ---------- market switch ---------- */
+document.getElementById('mkt').addEventListener('click',e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  market=e.target.dataset.m;
+  document.querySelectorAll('#mkt button').forEach(b=>b.classList.toggle('on',b.dataset.m===market));
+  document.getElementById('mktNote').textContent=MKT_NOTES[market];
+  renderGrid();computeVerdict();
+});
+
+/* ---------- persistence (window.storage) ---------- */
+function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+
+async function saveSnapshot(){
+  const {condRed,trigRed}=computeVerdict();
+  const payload={date:today(),condRed,trigRed,states:{...state},market};
+  try{
+    await window.storage.set('snap:'+payload.date, JSON.stringify(payload), false);
+    await loadHistory();
+  }catch(err){ alert('存储不可用（可能在预览环境）：'+err); }
+}
+async function loadHistory(){
+  let items=[];
+  try{
+    const res=await window.storage.list('snap:',false);
+    const keys=(res&&res.keys)?res.keys:[];
+    for(const k of keys){
+      const key=typeof k==='string'?k:(k.key||k.name);
+      try{const r=await window.storage.get(key,false); if(r&&r.value) items.push(JSON.parse(r.value));}catch(e){}
+    }
+  }catch(err){ /* storage unavailable */ }
+  items.sort((a,b)=>a.date<b.date?-1:1);
+  renderHistory(items);
+}
+async function delSnap(date){
+  try{await window.storage.delete('snap:'+date,false);}catch(e){}
+  loadHistory();
+}
+async function clearAll(){
+  if(!confirm('清空所有历史快照？'))return;
+  try{const res=await window.storage.list('snap:',false);const keys=(res&&res.keys)?res.keys:[];
+    for(const k of keys){const key=typeof k==='string'?k:(k.key||k.name);await window.storage.delete(key,false);}
+  }catch(e){}
+  loadHistory();
+}
+
+function renderHistory(items){
+  const host=document.getElementById('snaps');
+  const svg=document.getElementById('spark');
+  if(!items.length){
+    host.innerHTML='<div class="empty">还没有快照。填好本周读数后点"保存本周快照"。</div>';
+    svg.innerHTML='';return;
+  }
+  host.innerHTML=items.slice().reverse().map(it=>`
+    <div class="snap">
+      <span class="d">${it.date}</span>
+      <span style="color:var(--red)">条件 ${it.condRed}/4 红</span>
+      <span style="color:var(--gold)">扳机 ${it.trigRed}/4 红</span>
+      <button class="x" data-d="${it.date}">×</button>
+    </div>`).join('');
+  host.querySelectorAll('.x').forEach(b=>b.addEventListener('click',()=>delSnap(b.dataset.d)));
+
+  // sparkline
+  const W=800,H=140,pad=14;
+  const n=items.length, maxY=4;
+  const X=i=>n<=1?W/2:pad+i*(W-2*pad)/(n-1);
+  const Y=v=>H-pad-(v/maxY)*(H-2*pad);
+  const line=(arr,col)=>{
+    const pts=arr.map((v,i)=>`${X(i)},${Y(v)}`).join(' ');
+    const dots=arr.map((v,i)=>`<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${col}"/>`).join('');
+    return `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2"/>${dots}`;
+  };
+  let grid='';for(let g=0;g<=4;g++){const y=Y(g);grid+=`<line x1="${pad}" y1="${y}" x2="${W-pad}" y2="${y}" stroke="#2a241c" stroke-width="1"/><text x="2" y="${y+3}" fill="#6b6457" font-size="9">${g}</text>`;}
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.innerHTML=grid+line(items.map(i=>i.condRed),'#d9483b')+line(items.map(i=>i.trigRed),'#e0a93c');
+}
+
+document.getElementById('saveBtn').addEventListener('click',saveSnapshot);
+document.getElementById('clearBtn').addEventListener('click',clearAll);
+
+/* init */
+document.getElementById('mktNote').textContent=MKT_NOTES.us;
+renderGrid();computeVerdict();loadHistory();
+</script>
+</body>
+</html>
