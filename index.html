@@ -161,14 +161,19 @@
       <span id="fetchStatus"></span>
     </div>
     <div class="settings-panel" id="settingsPanel">
-      <label>Alpha Vantage API Key — 用于广度指标（RSP/SPY 等权比值法）</label>
+      <label>Alpha Vantage API Key — 广度（RSP/SPY 等权比值，仅美股）</label>
       <div class="key-row">
-        <input type="password" id="avKeyInput" class="reading" placeholder="粘贴你的 Free API Key">
+        <input type="password" id="avKeyInput" class="reading" placeholder="粘贴 AV Free API Key">
         <button class="btn sm" id="saveKeyBtn">保存</button>
       </div>
+      <label style="margin-top:12px">FRED API Key — 高收益信用利差 + 收益率曲线（美股波动率 / 宏观背景）</label>
+      <div class="key-row">
+        <input type="password" id="fredKeyInput" class="reading" placeholder="粘贴 FRED API Key">
+        <button class="btn sm" id="saveFredKeyBtn">保存</button>
+      </div>
       <p class="key-hint">
-        Key 仅存本地浏览器（localStorage），从不上传到任何服务器。免费申请：<a href="https://www.alphavantage.co/support/#api-key" target="_blank">alphavantage.co</a>（每日 25 次调用，每分钟 5 次）。<br>
-        广度算法：RSP（等权重）/ SPY（市值权）比值相对 50 日均值偏离 → 比值跑赢=多股参与上涨=健康广度。
+        Key 仅存本地浏览器（localStorage），从不上传。<br>
+        AV 免费：<a href="https://www.alphavantage.co/support/#api-key" target="_blank">alphavantage.co</a>（25次/日）　FRED 免费：<a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank">fred.stlouisfed.org</a>（无限制）
       </p>
     </div>
   </header>
@@ -408,7 +413,13 @@ function computeVerdict(){
   return {condRed,trigRed};
 }
 
-/* ---------- auto-fetch market data ---------- */
+/* ---------- api keys ---------- */
+function loadAvKey()  { return localStorage.getItem('av_key')   || ''; }
+function saveAvKey(k) { localStorage.setItem('av_key',   k); }
+function loadFredKey()  { return localStorage.getItem('fred_key') || ''; }
+function saveFredKey(k) { localStorage.setItem('fred_key', k); }
+
+/* ---------- auto-fetch: yahoo finance ---------- */
 const FETCH_SYMBOLS = {
   us:  { price:'^GSPC', vol:'^VIX',  volName:'VIX'  },
   nky: { price:'^N225', vol:null,    volName:null    },
@@ -421,12 +432,9 @@ async function yfetch(symbol) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${enc}?interval=1d&range=1y`;
   const PROXY = `https://corsproxy.io/?${encodeURIComponent(url)}`;
   let res;
-  // 先直连（本地 file:// 无 CORS），失败再走代理
   for (const u of [url, PROXY]) {
-    try {
-      res = await fetch(u, {signal: AbortSignal.timeout(6000)});
-      if (res.ok) break;
-    } catch(e) { res = null; }
+    try { res = await fetch(u, {signal: AbortSignal.timeout(6000)}); if (res.ok) break; }
+    catch(e) { res = null; }
   }
   if (!res?.ok) return null;
   const json = await res.json();
@@ -441,79 +449,36 @@ async function yfetch(symbol) {
   };
 }
 
-function classifyPRC(price, ma50, ma200) {
-  if (ma200 === null) return {color:'amber', note:''};
-  if (price < ma200 * 0.99) return {color:'red',   note:'价格跌破 200 日均线'};
-  if (price < ma50  * 0.99) return {color:'amber', note:'跌破 50 日但守住 200 日'};
-  return {color:'green', note:'价格守在均线之上'};
+/* ---------- auto-fetch: FRED ---------- */
+async function fredFetch(seriesId, limit, fredKey) {
+  const base = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${fredKey}&sort_order=desc&limit=${limit}&file_type=json`;
+  const PROXY = `https://corsproxy.io/?${encodeURIComponent(base)}`;
+  let res;
+  for (const u of [base, PROXY]) {
+    try { res = await fetch(u, {signal: AbortSignal.timeout(7000)}); if (res.ok) break; }
+    catch(e) { res = null; }
+  }
+  if (!res?.ok) return null;
+  const json = await res.json();
+  return json.observations?.filter(o => o.value !== '.').map(o => parseFloat(o.value)) ?? null;
 }
 
-function classifyVOL(current, ma20) {
-  const ratio = current / ma20;
-  if (current > 25 && ratio > 1.35) return {color:'red',   note:'高于 20 日均值 ' + (((ratio-1)*100)|0) + '%，体制切换信号'};
-  if (current > 17 || ratio > 1.2)  return {color:'amber', note:'轻度抬升，尚未持续'};
-  return {color:'green', note:'低位平稳'};
-}
-
-async function refreshData() {
-  const btn = document.getElementById('refreshBtn');
-  const status = document.getElementById('fetchStatus');
-  btn.disabled = true;
-  btn.textContent = '拉取中…';
-  status.textContent = '';
-
-  const syms = FETCH_SYMBOLS[market];
-  const [priceData, volData, breadthOk] = await Promise.all([
-    yfetch(syms.price),
-    syms.vol ? yfetch(syms.vol) : Promise.resolve(null),
-    fetchBreadth(avKey),
+async function fetchFredData(fredKey) {
+  if (!fredKey || market !== 'us') return null;
+  const [hyVals, ycVals] = await Promise.all([
+    fredFetch('BAMLH0A0HYM2', 30, fredKey), // HY 信用利差（30天）
+    fredFetch('T10Y2Y',        1,  fredKey), // 10y-2y 收益率曲线（最新值）
   ]);
-
-  let updated = 0;
-  const avKey = loadAvKey();
-
-  if (priceData?.ma200 !== undefined) {
-    const {price, ma50, ma200} = priceData;
-    const {color, note} = classifyPRC(price, ma50, ma200);
-    state['prc'] = color;
-    const ind = INDICATORS.find(i=>i.id==='prc');
-    const fmt = n => n ? n.toFixed(0) : '—';
-    ind._note = `⟳ ${PRICE_LABEL[market]} ${fmt(price)} | MA50 ${fmt(ma50)} | MA200 ${fmt(ma200)}（${note}）`;
-    updated++;
+  const result = {};
+  if (hyVals?.length >= 5) {
+    result.hy = { current: hyVals[0], ma30: hyVals.reduce((a,b)=>a+b,0)/hyVals.length };
   }
-
-  if (volData && syms.volName) {
-    const {price: cur, ma20} = volData;
-    const {color, note} = classifyVOL(cur, ma20);
-    state['vol'] = color;
-    const ind = INDICATORS.find(i=>i.id==='vol');
-    ind._note = `⟳ ${syms.volName} ${cur.toFixed(1)} | 20日均 ${ma20.toFixed(1)}（${note}）`;
-    updated++;
-  }
-
-  if (breadthOk) updated++;
-
-  renderGrid();
-  computeVerdict();
-
-  const suffix = !avKey && market==='us' ? '（设置 AV Key 可启用广度自动判读）' : '';
-  if (updated > 0) {
-    const t = new Date().toLocaleTimeString('zh',{hour:'2-digit',minute:'2-digit'});
-    status.textContent = `⟳ 已自动更新 ${updated} 项 · ${t}${suffix}`;
-    toast(`行情已刷新：${updated} 项自动判读`);
-  } else {
-    status.textContent = '拉取失败，请检查网络或稍后重试';
-    toast('数据拉取失败', 'err');
-  }
-  btn.disabled = false;
-  btn.textContent = '刷新行情';
+  if (ycVals?.length >= 1) result.yc = ycVals[0];
+  return Object.keys(result).length ? result : null;
 }
 
-/* ---------- alpha vantage breadth ---------- */
+/* ---------- auto-fetch: Alpha Vantage breadth ---------- */
 const AV_BASE = 'https://www.alphavantage.co/query';
-
-function loadAvKey(){ return localStorage.getItem('av_key') || ''; }
-function saveAvKey(k){ localStorage.setItem('av_key', k); }
 
 async function avFetch(params) {
   const url = AV_BASE + '?' + new URLSearchParams(params);
@@ -521,45 +486,124 @@ async function avFetch(params) {
     const res = await fetch(url, {signal: AbortSignal.timeout(8000)});
     if (!res.ok) return null;
     const json = await res.json();
-    if (json['Note'] || json['Information']) return null; // rate limit hit
+    if (json['Note'] || json['Information']) return null;
     return json;
   } catch(e) { return null; }
 }
 
 async function fetchBreadth(apiKey) {
-  if (!apiKey || market !== 'us') return false; // RSP/SPY ratio 仅适用美股
-
+  if (!apiKey || market !== 'us') return false;
   const [rspData, spyData] = await Promise.all([
     avFetch({function:'TIME_SERIES_DAILY', symbol:'RSP', outputsize:'compact', apikey:apiKey}),
     avFetch({function:'TIME_SERIES_DAILY', symbol:'SPY', outputsize:'compact', apikey:apiKey}),
   ]);
-
   const rspSeries = rspData?.['Time Series (Daily)'];
   const spySeries = spyData?.['Time Series (Daily)'];
   if (!rspSeries || !spySeries) return false;
-
-  const dates = Object.keys(rspSeries).sort().reverse();
   const ratios = [];
-  for (const d of dates) {
+  for (const d of Object.keys(rspSeries).sort().reverse()) {
     if (!spySeries[d]) continue;
     ratios.push(parseFloat(rspSeries[d]['4. close']) / parseFloat(spySeries[d]['4. close']));
     if (ratios.length >= 55) break;
   }
   if (ratios.length < 10) return false;
-
   const current = ratios[0];
   const n = Math.min(50, ratios.length);
-  const ma50 = ratios.slice(0, n).reduce((a,b)=>a+b,0) / n;
-  const pct = (current / ma50 - 1) * 100;
-
-  const color = pct > 1.5 ? 'green' : pct < -2.0 ? 'red' : 'amber';
-  const label = pct > 1.5 ? '等权跑赢，广度健康' : pct < -2.0 ? '等权跑输，龙头独大' : '广度中性';
+  const ma50 = ratios.slice(0,n).reduce((a,b)=>a+b,0)/n;
+  const pct  = (current/ma50 - 1)*100;
   const sign = pct >= 0 ? '+' : '';
-
-  state['bre'] = color;
+  state['bre'] = pct > 1.5 ? 'green' : pct < -2.0 ? 'red' : 'amber';
+  const label  = pct > 1.5 ? '等权跑赢，广度健康' : pct < -2.0 ? '等权跑输，龙头独大' : '广度中性';
   INDICATORS.find(i=>i.id==='bre')._note =
     `⟳ RSP/SPY ${current.toFixed(4)} | 50日均 ${ma50.toFixed(4)}（${sign}${pct.toFixed(1)}%）— ${label}`;
   return true;
+}
+
+/* ---------- classify helpers ---------- */
+function classifyPRC(price, ma50, ma200) {
+  if (ma200 === null) return {color:'amber', note:'历史数据不足'};
+  if (price < ma200 * 0.99) return {color:'red',   note:'跌破 200 日均线'};
+  if (price < ma50  * 0.99) return {color:'amber', note:'跌破 50 日但守住 200 日'};
+  return {color:'green', note:'守在均线之上'};
+}
+
+function classifyVOL(vix, vixMa20, hy) {
+  const vixSpike = vix > 25 && vix/vixMa20 > 1.35;
+  const hyBlowout = hy && hy.current > 5;
+  const hyWidening = hy && hy.current > hy.ma30 * 1.15;
+  if (vixSpike || hyBlowout) return {color:'red',   note:'体制切换或信用爆扩'};
+  if (vix > 17 || hyWidening) return {color:'amber', note:'轻度抬升，尚未持续'};
+  return {color:'green', note:'低位平稳'};
+}
+
+/* ---------- main refresh ---------- */
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  const status = document.getElementById('fetchStatus');
+  btn.disabled = true; btn.textContent = '拉取中…'; status.textContent = '';
+
+  const avKey   = loadAvKey();
+  const fredKey = loadFredKey();
+  const syms    = FETCH_SYMBOLS[market];
+
+  const [priceData, volData, breadthOk, fredData] = await Promise.all([
+    yfetch(syms.price),
+    syms.vol ? yfetch(syms.vol) : Promise.resolve(null),
+    fetchBreadth(avKey),
+    fetchFredData(fredKey),
+  ]);
+
+  let updated = 0;
+  const fmt = n => n != null ? n.toFixed(0) : '—';
+
+  // 价格结构
+  if (priceData) {
+    const {price, ma50, ma200} = priceData;
+    const {color, note} = classifyPRC(price, ma50, ma200);
+    state['prc'] = color;
+    const ind = INDICATORS.find(i=>i.id==='prc');
+    let n = `⟳ ${PRICE_LABEL[market]} ${fmt(price)} | MA50 ${fmt(ma50)} | MA200 ${fmt(ma200)}（${note}）`;
+    if (fredData?.yc != null) {
+      const sign = fredData.yc >= 0 ? '+' : '';
+      n += ` | 收益率曲线 10y-2y ${sign}${fredData.yc.toFixed(2)}%`;
+    }
+    ind._note = n;
+    updated++;
+  }
+
+  // 波动率：VIX + HY 信用利差双驱动
+  if (volData && syms.volName) {
+    const {price: vix, ma20: vixMa20} = volData;
+    const hy = fredData?.hy;
+    const {color, note} = classifyVOL(vix, vixMa20, hy);
+    state['vol'] = color;
+    let n = `⟳ ${syms.volName} ${vix.toFixed(1)} | 20日均 ${vixMa20.toFixed(1)}（${note}）`;
+    if (hy) {
+      const trend = hy.current > hy.ma30 ? '⬆走阔' : '⬇收窄';
+      n += ` | HY利差 ${hy.current.toFixed(2)}%（30日均 ${hy.ma30.toFixed(2)}% ${trend}）`;
+    }
+    INDICATORS.find(i=>i.id==='vol')._note = n;
+    updated++;
+  }
+
+  if (breadthOk) updated++;
+
+  renderGrid(); computeVerdict();
+
+  const hints = [];
+  if (!avKey   && market==='us') hints.push('设置 AV Key 启用广度');
+  if (!fredKey && market==='us') hints.push('设置 FRED Key 启用利差');
+  const hintStr = hints.length ? `（${hints.join('、')}）` : '';
+
+  if (updated > 0) {
+    const t = new Date().toLocaleTimeString('zh',{hour:'2-digit',minute:'2-digit'});
+    status.textContent = `⟳ 已自动更新 ${updated} 项 · ${t}${hintStr}`;
+    toast(`行情已刷新：${updated} 项自动判读`);
+  } else {
+    status.textContent = `拉取失败，请检查网络${hintStr}`;
+    toast('数据拉取失败', 'err');
+  }
+  btn.disabled = false; btn.textContent = '刷新行情';
 }
 
 /* ---------- persistence ---------- */
@@ -661,13 +705,21 @@ document.getElementById('saveKeyBtn').addEventListener('click',()=>{
   const k = document.getElementById('avKeyInput').value.trim();
   saveAvKey(k);
   document.getElementById('settingsPanel').classList.remove('open');
-  toast(k ? 'API Key 已保存，刷新行情即启用广度指标 ✓' : 'Key 已清除');
+  toast(k ? 'AV Key 已保存，刷新行情即启用广度 ✓' : 'AV Key 已清除');
   if (k) refreshData();
 });
 
-/* init: populate saved key */
-const _k = loadAvKey();
-if (_k) document.getElementById('avKeyInput').value = _k;
+document.getElementById('saveFredKeyBtn').addEventListener('click',()=>{
+  const k = document.getElementById('fredKeyInput').value.trim();
+  saveFredKey(k);
+  document.getElementById('settingsPanel').classList.remove('open');
+  toast(k ? 'FRED Key 已保存，刷新行情即启用利差数据 ✓' : 'FRED Key 已清除');
+  if (k) refreshData();
+});
+
+/* init: populate saved keys */
+const _avk   = loadAvKey();   if (_avk)   document.getElementById('avKeyInput').value   = _avk;
+const _fredk = loadFredKey(); if (_fredk) document.getElementById('fredKeyInput').value = _fredk;
 
 /* market switch also triggers data refresh */
 document.getElementById('mkt').addEventListener('click',e=>{
