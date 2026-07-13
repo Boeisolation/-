@@ -121,6 +121,13 @@
   .toast.show{opacity:1;transform:none}
   .toast.err{border-color:var(--red);color:var(--red)}
 
+  /* auto-fetch */
+  .refresh-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+  #fetchStatus{font-size:11px;color:var(--paper-faint)}
+  .btn.sm{font-size:11px;padding:6px 12px;border-radius:7px}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+  .auto-badge{display:inline-block;font-size:9px;letter-spacing:.1em;padding:1px 5px;border-radius:4px;background:rgba(63,154,110,.18);color:var(--green);vertical-align:middle;margin-left:6px;text-transform:uppercase}
+
   footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);font-size:11px;color:var(--paper-faint);line-height:1.7}
   footer b{color:var(--paper-dim);font-weight:500}
 </style>
@@ -138,6 +145,10 @@
         <button data-m="hsi">恒生</button>
       </div>
       <div class="mkt-note" id="mktNote"></div>
+    </div>
+    <div class="refresh-row">
+      <button class="btn ghost sm" id="refreshBtn">刷新行情</button>
+      <span id="fetchStatus"></span>
     </div>
   </header>
 
@@ -376,14 +387,101 @@ function computeVerdict(){
   return {condRed,trigRed};
 }
 
-/* ---------- market switch ---------- */
-document.getElementById('mkt').addEventListener('click',e=>{
-  if(e.target.tagName!=='BUTTON')return;
-  market=e.target.dataset.m;
-  document.querySelectorAll('#mkt button').forEach(b=>b.classList.toggle('on',b.dataset.m===market));
-  document.getElementById('mktNote').textContent=MKT_NOTES[market];
-  renderGrid();computeVerdict();
-});
+/* ---------- auto-fetch market data ---------- */
+const FETCH_SYMBOLS = {
+  us:  { price:'^GSPC', vol:'^VIX',  volName:'VIX'  },
+  nky: { price:'^N225', vol:null,    volName:null    },
+  hsi: { price:'^HSI',  vol:'^VHSI', volName:'VHSI' },
+};
+const PRICE_LABEL = { us:'S&P 500', nky:'日经225', hsi:'恒生指数' };
+
+async function yfetch(symbol) {
+  const enc = encodeURIComponent(symbol);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${enc}?interval=1d&range=1y`;
+  const PROXY = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+  let res;
+  // 先直连（本地 file:// 无 CORS），失败再走代理
+  for (const u of [url, PROXY]) {
+    try {
+      res = await fetch(u, {signal: AbortSignal.timeout(6000)});
+      if (res.ok) break;
+    } catch(e) { res = null; }
+  }
+  if (!res?.ok) return null;
+  const json = await res.json();
+  const closes = json.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(c => c != null);
+  if (!closes?.length) return null;
+  const avg = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+  return {
+    price: closes.at(-1),
+    ma20:  closes.length >= 20  ? avg(closes.slice(-20))  : avg(closes),
+    ma50:  closes.length >= 50  ? avg(closes.slice(-50))  : avg(closes),
+    ma200: closes.length >= 200 ? avg(closes.slice(-200)) : null,
+  };
+}
+
+function classifyPRC(price, ma50, ma200) {
+  if (ma200 === null) return {color:'amber', note:''};
+  if (price < ma200 * 0.99) return {color:'red',   note:'价格跌破 200 日均线'};
+  if (price < ma50  * 0.99) return {color:'amber', note:'跌破 50 日但守住 200 日'};
+  return {color:'green', note:'价格守在均线之上'};
+}
+
+function classifyVOL(current, ma20) {
+  const ratio = current / ma20;
+  if (current > 25 && ratio > 1.35) return {color:'red',   note:'高于 20 日均值 ' + (((ratio-1)*100)|0) + '%，体制切换信号'};
+  if (current > 17 || ratio > 1.2)  return {color:'amber', note:'轻度抬升，尚未持续'};
+  return {color:'green', note:'低位平稳'};
+}
+
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  const status = document.getElementById('fetchStatus');
+  btn.disabled = true;
+  btn.textContent = '拉取中…';
+  status.textContent = '';
+
+  const syms = FETCH_SYMBOLS[market];
+  const [priceData, volData] = await Promise.all([
+    yfetch(syms.price),
+    syms.vol ? yfetch(syms.vol) : Promise.resolve(null),
+  ]);
+
+  let updated = 0;
+
+  if (priceData?.ma200 !== undefined) {
+    const {price, ma50, ma200} = priceData;
+    const {color, note} = classifyPRC(price, ma50, ma200);
+    state['prc'] = color;
+    const ind = INDICATORS.find(i=>i.id==='prc');
+    const fmt = n => n ? n.toFixed(0) : '—';
+    ind._note = `⟳ ${PRICE_LABEL[market]} ${fmt(price)} | MA50 ${fmt(ma50)} | MA200 ${fmt(ma200)}（${note}）`;
+    updated++;
+  }
+
+  if (volData && syms.volName) {
+    const {price: cur, ma20} = volData;
+    const {color, note} = classifyVOL(cur, ma20);
+    state['vol'] = color;
+    const ind = INDICATORS.find(i=>i.id==='vol');
+    ind._note = `⟳ ${syms.volName} ${cur.toFixed(1)} | 20日均 ${ma20.toFixed(1)}（${note}）`;
+    updated++;
+  }
+
+  renderGrid();
+  computeVerdict();
+
+  if (updated > 0) {
+    const t = new Date().toLocaleTimeString('zh',{hour:'2-digit',minute:'2-digit'});
+    status.textContent = `⟳ 已自动更新 ${updated} 项 · ${t}（其余指标请手动填写）`;
+    toast(`行情已刷新：${updated} 项自动判读`);
+  } else {
+    status.textContent = '拉取失败，请检查网络或稍后重试';
+    toast('数据拉取失败', 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '刷新行情';
+}
 
 /* ---------- persistence ---------- */
 function today(){return new Date().toLocaleDateString('sv');}
@@ -475,10 +573,22 @@ function renderHistory(items){
 
 document.getElementById('saveBtn').addEventListener('click',saveSnapshot);
 document.getElementById('clearBtn').addEventListener('click',clearAll);
+document.getElementById('refreshBtn').addEventListener('click',refreshData);
+
+/* market switch also triggers data refresh */
+document.getElementById('mkt').addEventListener('click',e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  market=e.target.dataset.m;
+  document.querySelectorAll('#mkt button').forEach(b=>b.classList.toggle('on',b.dataset.m===market));
+  document.getElementById('mktNote').textContent=MKT_NOTES[market];
+  renderGrid();computeVerdict();
+  refreshData();
+});
 
 /* init */
 document.getElementById('mktNote').textContent=MKT_NOTES.us;
 renderGrid();computeVerdict();loadHistory();
+refreshData();
 </script>
 </body>
 </html>
