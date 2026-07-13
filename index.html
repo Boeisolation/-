@@ -172,7 +172,8 @@
         <button class="btn sm" id="saveFredKeyBtn">保存</button>
       </div>
       <p class="key-hint">
-        Key 仅存本地浏览器（localStorage），从不上传。<br>
+        Key 仅存本地浏览器（localStorage），从不上传服务器。<br>
+        ⚠ FRED / Yahoo 无 CORS 头，请求会经公共代理（corsproxy.io / allorigins）转发——FRED key 对代理可见，请只使用免费低敏感 key。<br>
         AV 免费：<a href="https://www.alphavantage.co/support/#api-key" target="_blank">alphavantage.co</a>（25次/日）　FRED 免费：<a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank">fred.stlouisfed.org</a>（无限制）
       </p>
     </div>
@@ -183,6 +184,7 @@
       <div class="lab">当前判读</div>
       <div class="vstate" id="vState">—</div>
       <div class="vmove" id="vMove">选择各指标的灯,结论会自动更新。</div>
+      <div class="vmove" id="vPersist" style="margin-top:10px;font-size:11.5px;color:var(--paper-faint)"></div>
       <div class="counts">
         <div class="count"><div class="n" id="cCond">0<span style="font-size:15px;color:var(--paper-faint)">/4</span></div><div class="c">条件层 红灯</div></div>
         <div class="count"><div class="n" id="cTrig">0<span style="font-size:15px;color:var(--paper-faint)">/4</span></div><div class="c">扳机层 红灯</div></div>
@@ -227,7 +229,7 @@
 
   <footer>
     <b>三条铁律：</b>① 阈值是"区间"不是"线"；② 持续性 &gt; 单周读数（连续 2–3 周的极端才算数）；③ 单一绿灯别加杠杆,单一红灯别清仓。<br>
-    数据需你手动填入（来源见监测清单）。本面板只做判读与留痕,不替你做交易决定。快照存于浏览器本地,清除聊天不影响。
+    价格结构 / 波动率 / 广度可自动拉取（⟳ 标记），其余指标需手动填入。本面板只做判读与留痕,不替你做交易决定。快照存于浏览器本地。
   </footer>
 </div>
 
@@ -243,7 +245,7 @@ const INDICATORS = [
     }, mkt:{
       nky:{red:'极端贵：日经前瞻PE&gt;20（常态~14–16）',amber:'偏高：前瞻PE 17–20',green:'合理：前瞻PE&lt;17'},
       hsi:{red:'罕见——恒生通常便宜,估值极少是它的红灯',amber:'PE 11–14 / 接近历史中枢',green:'便宜（多数时间）：PE&lt;11 或 PB&lt;1 = 价值/见底区'}
-    }, def:'red', note:'CAPE 40.7 / 前瞻PE~21'},
+    }, def:'red'},
 
   {id:'con', layer:'condition', name:'集中度', en:'Concentration',
     opts:{
@@ -253,7 +255,7 @@ const INDICATORS = [
     }, mkt:{
       nky:{red:'少数高价股（优衣库/爱德万/软银）主导指数涨跌',amber:'集中但未极端',green:'涨幅分散'},
       hsi:{red:'腾讯/阿里/美团+金融高度主导',amber:'集中但分散在两三个板块',green:'多板块齐涨'}
-    }, def:'red', note:'前十大 ~40%（纪录）'},
+    }, def:'red'},
 
   {id:'lev', layer:'condition', name:'杠杆', en:'Leverage',
     opts:{
@@ -263,7 +265,7 @@ const INDICATORS = [
     }, mkt:{
       nky:{red:'JPX 信用买残快速攀升',amber:'信用买残温和上升',green:'信用买残平稳/下降'},
       hsi:{red:'孖展(margin)余额飙升 / 卖空比极低',amber:'中性',green:'去杠杆中'}
-    }, def:'red', note:'融资 +36%YoY,融资/GDP 4.09 纪录'},
+    }, def:'red'},
 
   {id:'pos', layer:'condition', name:'仓位 / 资金流', en:'Positioning',
     opts:{
@@ -273,7 +275,7 @@ const INDICATORS = [
     }, mkt:{
       hsi:{red:'南向资金单边疯狂涌入单一题材',amber:'南向中性',green:'南向净流出（悲观）'},
       nky:{red:'外资单边大举买入日股',amber:'外资中性',green:'外资净卖出'}
-    }, def:'amber', note:'FMS 现金未知 → 暂中性'},
+    }, def:'amber'},
 
   {id:'sen', layer:'trigger', name:'情绪', en:'Sentiment',
     opts:{
@@ -283,28 +285,28 @@ const INDICATORS = [
     }, mkt:{
       nky:{red:'日经VI 极低 + 资金狂热,媒体一致看多',amber:'偏乐观',green:'谨慎/分歧'},
       hsi:{red:'南向/散户由观望转一致追入',amber:'分歧',green:'普遍悲观（常态）'}
-    }, def:'green', note:'AAII 多35.6% &lt; 空41.9%'},
+    }, def:'green'},
 
   {id:'bre', layer:'trigger', name:'广度', en:'Breadth',
     opts:{
       red:'负背离：指数创新高但"200日线上方占比"低于前高 / 跌破50%',
       amber:'走平 / 小幅背离',
       green:'健康：创新高且占比同步走高'
-    }, def:'amber', note:'200日线占比 待填（每周自查 $SPXA200R）'},
+    }, def:'amber'},
 
   {id:'prc', layer:'trigger', name:'价格结构', en:'Price',
     opts:{
       red:'放量跌破 200 日均线 / 龙头跌破关键支撑',
       amber:'跌破 50 日线但守住 200 日线',
       green:'守在均线之上 / 趋势完好'
-    }, def:'green', note:'纳指/标普100 历史高位'},
+    }, def:'green'},
 
   {id:'vol', layer:'trigger', name:'波动率', en:'Volatility',
     opts:{
       red:'体制切换：VIX / 日经VI / VHSI 从低位跳升并维持',
       amber:'单日脉冲后回落',
       green:'低位平稳'
-    }, def:'amber', note:'VIX ~16（偏自满,未切换）'}
+    }, def:'amber'}
 ];
 
 let market='us';
@@ -420,41 +422,64 @@ function loadFredKey()  { return localStorage.getItem('fred_key') || ''; }
 function saveFredKey(k) { localStorage.setItem('fred_key', k); }
 
 /* ---------- auto-fetch: yahoo finance ---------- */
+/* 注：^VHSI / 日经VI 在 Yahoo 无数据，日经与恒生的波动率改用指数收盘价计算的已实现波动率（HV） */
 const FETCH_SYMBOLS = {
-  us:  { price:'^GSPC', vol:'^VIX',  volName:'VIX'  },
-  nky: { price:'^N225', vol:null,    volName:null    },
-  hsi: { price:'^HSI',  vol:'^VHSI', volName:'VHSI' },
+  us:  { price:'^GSPC', vol:'^VIX', volName:'VIX'  },
+  nky: { price:'^N225', vol:null,   volName:'HV20' },
+  hsi: { price:'^HSI',  vol:null,   volName:'HV20' },
 };
 const PRICE_LABEL = { us:'S&P 500', nky:'日经225', hsi:'恒生指数' };
+
+/* 直连 → corsproxy → allorigins 三级回退 */
+const withProxies = u => [
+  u,
+  `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+];
 
 async function yfetch(symbol) {
   const enc = encodeURIComponent(symbol);
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${enc}?interval=1d&range=1y`;
-  const PROXY = `https://corsproxy.io/?${encodeURIComponent(url)}`;
   let res;
-  for (const u of [url, PROXY]) {
+  for (const u of withProxies(url)) {
     try { res = await fetch(u, {signal: AbortSignal.timeout(6000)}); if (res.ok) break; }
     catch(e) { res = null; }
   }
   if (!res?.ok) return null;
   const json = await res.json();
-  const closes = json.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(c => c != null);
+  const quote = json.chart?.result?.[0]?.indicators?.quote?.[0];
+  const closes = quote?.close?.filter(c => c != null);
   if (!closes?.length) return null;
+  const vols = (quote.volume || []).filter(v => v != null && v > 0);
   const avg = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
   return {
     price: closes.at(-1),
+    ma5:   avg(closes.slice(-5)),
     ma20:  closes.length >= 20  ? avg(closes.slice(-20))  : avg(closes),
     ma50:  closes.length >= 50  ? avg(closes.slice(-50))  : avg(closes),
     ma200: closes.length >= 200 ? avg(closes.slice(-200)) : null,
+    high52: Math.max(...closes),
+    volRatio: vols.length >= 50 ? avg(vols.slice(-5)) / avg(vols.slice(-50)) : null,
+    closes,
   };
+}
+
+/* 已实现波动率：近 win 日 log 收益标准差，年化为百分数 */
+function realizedVol(closes, win) {
+  const c = closes.slice(-(win+1));
+  if (c.length < win+1) return null;
+  const rets = [];
+  for (let i=1; i<c.length; i++) rets.push(Math.log(c[i]/c[i-1]));
+  const mean = rets.reduce((a,b)=>a+b,0)/rets.length;
+  const varr = rets.reduce((a,b)=>a+(b-mean)**2,0)/(rets.length-1);
+  return Math.sqrt(varr*252)*100;
 }
 
 /* ---------- auto-fetch: FRED ---------- */
 async function fredFetch(seriesId, limit, fredKey) {
   const base = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${fredKey}&sort_order=desc&limit=${limit}&file_type=json`;
-  const PROXY = `https://corsproxy.io/?${encodeURIComponent(base)}`;
   let res;
-  for (const u of [base, PROXY]) {
+  for (const u of withProxies(base)) {
     try { res = await fetch(u, {signal: AbortSignal.timeout(7000)}); if (res.ok) break; }
     catch(e) { res = null; }
   }
@@ -463,8 +488,8 @@ async function fredFetch(seriesId, limit, fredKey) {
   return json.observations?.filter(o => o.value !== '.').map(o => parseFloat(o.value)) ?? null;
 }
 
-async function fetchFredData(fredKey) {
-  if (!fredKey || market !== 'us') return null;
+async function fetchFredData(fredKey, mkt) {
+  if (!fredKey || mkt !== 'us') return null;
   const [hyVals, ycVals] = await Promise.all([
     fredFetch('BAMLH0A0HYM2', 30, fredKey), // HY 信用利差（30天）
     fredFetch('T10Y2Y',        1,  fredKey), // 10y-2y 收益率曲线（最新值）
@@ -491,93 +516,132 @@ async function avFetch(params) {
   } catch(e) { return null; }
 }
 
-async function fetchBreadth(apiKey) {
-  if (!apiKey || market !== 'us') return false;
+/* 日线数据一天只拉一次：结果缓存进 localStorage，节省 AV 免费配额（25次/日） */
+async function fetchBreadth(apiKey, mkt) {
+  if (!apiKey || mkt !== 'us') return null;
+  try {
+    const c = JSON.parse(localStorage.getItem('bre_cache'));
+    if (c?.date === today() && c.data) return c.data;
+  } catch(e) {}
   const [rspData, spyData] = await Promise.all([
     avFetch({function:'TIME_SERIES_DAILY', symbol:'RSP', outputsize:'compact', apikey:apiKey}),
     avFetch({function:'TIME_SERIES_DAILY', symbol:'SPY', outputsize:'compact', apikey:apiKey}),
   ]);
   const rspSeries = rspData?.['Time Series (Daily)'];
   const spySeries = spyData?.['Time Series (Daily)'];
-  if (!rspSeries || !spySeries) return false;
+  if (!rspSeries || !spySeries) return null;
   const ratios = [];
   for (const d of Object.keys(rspSeries).sort().reverse()) {
     if (!spySeries[d]) continue;
     ratios.push(parseFloat(rspSeries[d]['4. close']) / parseFloat(spySeries[d]['4. close']));
     if (ratios.length >= 55) break;
   }
-  if (ratios.length < 10) return false;
+  if (ratios.length < 10) return null;
   const current = ratios[0];
   const n = Math.min(50, ratios.length);
   const ma50 = ratios.slice(0,n).reduce((a,b)=>a+b,0)/n;
-  const pct  = (current/ma50 - 1)*100;
-  const sign = pct >= 0 ? '+' : '';
-  state['bre'] = pct > 1.5 ? 'green' : pct < -2.0 ? 'red' : 'amber';
-  const label  = pct > 1.5 ? '等权跑赢，广度健康' : pct < -2.0 ? '等权跑输，龙头独大' : '广度中性';
-  INDICATORS.find(i=>i.id==='bre')._note =
-    `⟳ RSP/SPY ${current.toFixed(4)} | 50日均 ${ma50.toFixed(4)}（${sign}${pct.toFixed(1)}%）— ${label}`;
-  return true;
+  const data = { current, ma50, pct: (current/ma50 - 1)*100 };
+  localStorage.setItem('bre_cache', JSON.stringify({date: today(), data}));
+  return data;
 }
 
 /* ---------- classify helpers ---------- */
-function classifyPRC(price, ma50, ma200) {
+function classifyPRC(price, ma50, ma200, volRatio) {
   if (ma200 === null) return {color:'amber', note:'历史数据不足'};
-  if (price < ma200 * 0.99) return {color:'red',   note:'跌破 200 日均线'};
-  if (price < ma50  * 0.99) return {color:'amber', note:'跌破 50 日但守住 200 日'};
+  if (price < ma200) {
+    /* 定义要求"放量"跌破才是 red：近5日均量 / 50日均量 > 1.3 视为放量 */
+    const heavy = volRatio != null && volRatio > 1.3;
+    return heavy ? {color:'red',   note:'放量跌破 200 日均线'}
+                 : {color:'amber', note:'跌破 200 日但未放量——若持续或放量则转红'};
+  }
+  if (price < ma50) return {color:'amber', note:'跌破 50 日但守住 200 日'};
   return {color:'green', note:'守在均线之上'};
 }
 
-function classifyVOL(vix, vixMa20, hy) {
-  const vixSpike = vix > 25 && vix/vixMa20 > 1.35;
-  const hyBlowout = hy && hy.current > 5;
+/* 波动率阈值按数据源校准：已实现波动率（HV）通常比隐含低 2-4 个点 */
+const VOL_THRESH = {
+  VIX:  { spike: 25, amber: 17 },
+  HV20: { spike: 30, amber: 21 },
+};
+
+function classifyVOL(vol, ma5, ma20, hy, volName) {
+  const t = VOL_THRESH[volName] || VOL_THRESH.VIX;
+  /* red 定义是"跳升并维持"：5日均相对20日均抬升 + 当前值超阈值；单日脉冲按定义归 amber */
+  const sustained  = vol > t.spike && ma5 / ma20 > 1.25;
+  const hyBlowout  = hy && hy.current > 5;
   const hyWidening = hy && hy.current > hy.ma30 * 1.15;
-  if (vixSpike || hyBlowout) return {color:'red',   note:'体制切换或信用爆扩'};
-  if (vix > 17 || hyWidening) return {color:'amber', note:'轻度抬升，尚未持续'};
+  if (sustained || hyBlowout) return {color:'red',   note:'跳升并维持（体制切换）或信用爆扩'};
+  if (vol > t.spike)          return {color:'amber', note:'单日脉冲，观察是否维持'};
+  if (vol > t.amber || hyWidening) return {color:'amber', note:'轻度抬升，尚未持续'};
   return {color:'green', note:'低位平稳'};
 }
 
+/* 广度 red 的定义是"负背离"：指数临近52周高位 + 等权明显跑输，两者缺一不可 */
+function classifyBRE(bre, priceData) {
+  const {pct} = bre;
+  const sign = pct >= 0 ? '+' : '';
+  const base = `⟳ RSP/SPY ${bre.current.toFixed(4)} | 50日均 ${bre.ma50.toFixed(4)}（${sign}${pct.toFixed(1)}%）`;
+  const nearHigh = priceData?.high52 && priceData.price > priceData.high52 * 0.97;
+  if (pct < -2.0 && nearHigh) return {color:'red',   note: base + '— 指数近52周高位而等权跑输：负背离'};
+  if (pct < -2.0)             return {color:'amber', note: base + '— 等权跑输，但指数不在高位（回调常态）'};
+  if (pct > 1.5)              return {color:'green', note: base + '— 等权跑赢，广度健康'};
+  return {color:'amber', note: base + '— 广度中性'};
+}
+
 /* ---------- main refresh ---------- */
+let fetchGen = 0; // 请求代际：切换市场后，在途旧请求的结果直接丢弃
 async function refreshData() {
+  const gen = ++fetchGen;
+  const mkt = market;
   const btn = document.getElementById('refreshBtn');
   const status = document.getElementById('fetchStatus');
   btn.disabled = true; btn.textContent = '拉取中…'; status.textContent = '';
 
   const avKey   = loadAvKey();
   const fredKey = loadFredKey();
-  const syms    = FETCH_SYMBOLS[market];
+  const syms    = FETCH_SYMBOLS[mkt];
 
-  const [priceData, volData, breadthOk, fredData] = await Promise.all([
+  const [priceData, volData, breData, fredData] = await Promise.all([
     yfetch(syms.price),
     syms.vol ? yfetch(syms.vol) : Promise.resolve(null),
-    fetchBreadth(avKey),
-    fetchFredData(fredKey),
+    fetchBreadth(avKey, mkt),
+    fetchFredData(fredKey, mkt),
   ]);
+
+  if (gen !== fetchGen) return; // 期间已切换市场或触发新刷新
 
   let updated = 0;
   const fmt = n => n != null ? n.toFixed(0) : '—';
 
   // 价格结构
   if (priceData) {
-    const {price, ma50, ma200} = priceData;
-    const {color, note} = classifyPRC(price, ma50, ma200);
+    const {price, ma50, ma200, volRatio} = priceData;
+    const {color, note} = classifyPRC(price, ma50, ma200, volRatio);
     state['prc'] = color;
-    const ind = INDICATORS.find(i=>i.id==='prc');
-    let n = `⟳ ${PRICE_LABEL[market]} ${fmt(price)} | MA50 ${fmt(ma50)} | MA200 ${fmt(ma200)}（${note}）`;
+    let n = `⟳ ${PRICE_LABEL[mkt]} ${fmt(price)} | MA50 ${fmt(ma50)} | MA200 ${fmt(ma200)}（${note}）`;
     if (fredData?.yc != null) {
       const sign = fredData.yc >= 0 ? '+' : '';
       n += ` | 收益率曲线 10y-2y ${sign}${fredData.yc.toFixed(2)}%`;
     }
-    ind._note = n;
+    INDICATORS.find(i=>i.id==='prc')._note = n;
     updated++;
   }
 
-  // 波动率：VIX + HY 信用利差双驱动
-  if (volData && syms.volName) {
-    const {price: vix, ma20: vixMa20} = volData;
+  // 波动率：美股用 VIX（隐含），日经/恒生用指数已实现波动率 HV20；均叠加 HY 信用利差
+  let volSrc = null;
+  if (syms.vol && volData) {
+    volSrc = { cur: volData.price, s: volData.ma5, l: volData.ma20, sLab: '5日均', lLab: '20日均' };
+  } else if (!syms.vol && syms.volName === 'HV20' && priceData?.closes?.length >= 61) {
+    const hv10 = realizedVol(priceData.closes, 10);
+    const hv20 = realizedVol(priceData.closes, 20);
+    const hv60 = realizedVol(priceData.closes, 60);
+    if (hv10 && hv20 && hv60) volSrc = { cur: hv20, s: hv10, l: hv60, sLab: 'HV10', lLab: 'HV60' };
+  }
+  if (volSrc) {
     const hy = fredData?.hy;
-    const {color, note} = classifyVOL(vix, vixMa20, hy);
+    const {color, note} = classifyVOL(volSrc.cur, volSrc.s, volSrc.l, hy, syms.volName);
     state['vol'] = color;
-    let n = `⟳ ${syms.volName} ${vix.toFixed(1)} | 20日均 ${vixMa20.toFixed(1)}（${note}）`;
+    let n = `⟳ ${syms.volName} ${volSrc.cur.toFixed(1)} | ${volSrc.sLab} ${volSrc.s.toFixed(1)} / ${volSrc.lLab} ${volSrc.l.toFixed(1)}（${note}）`;
     if (hy) {
       const trend = hy.current > hy.ma30 ? '⬆走阔' : '⬇收窄';
       n += ` | HY利差 ${hy.current.toFixed(2)}%（30日均 ${hy.ma30.toFixed(2)}% ${trend}）`;
@@ -586,13 +650,19 @@ async function refreshData() {
     updated++;
   }
 
-  if (breadthOk) updated++;
+  // 广度：需要 priceData 判断"是否临近52周高位"才能识别真背离
+  if (breData) {
+    const {color, note} = classifyBRE(breData, priceData);
+    state['bre'] = color;
+    INDICATORS.find(i=>i.id==='bre')._note = note;
+    updated++;
+  }
 
-  renderGrid(); computeVerdict();
+  renderGrid(); computeVerdict(); updatePersistence();
 
   const hints = [];
-  if (!avKey   && market==='us') hints.push('设置 AV Key 启用广度');
-  if (!fredKey && market==='us') hints.push('设置 FRED Key 启用利差');
+  if (!avKey   && mkt==='us') hints.push('设置 AV Key 启用广度');
+  if (!fredKey && mkt==='us') hints.push('设置 FRED Key 启用利差');
   const hintStr = hints.length ? `（${hints.join('、')}）` : '';
 
   if (updated > 0) {
@@ -609,11 +679,12 @@ async function refreshData() {
 /* ---------- persistence ---------- */
 function today(){return new Date().toLocaleDateString('sv');}
 
+/* 快照键带市场前缀（snap:us:2026-07-13），避免同日不同市场互相覆盖；兼容旧格式 snap:date */
 async function saveSnapshot(){
   const {condRed,trigRed}=computeVerdict();
   const payload={date:today(),condRed,trigRed,states:{...state},market};
   try{
-    await store.set('snap:'+payload.date,JSON.stringify(payload));
+    await store.set(`snap:${market}:${payload.date}`,JSON.stringify(payload));
     await loadHistory();
     toast('快照已保存 ✓');
   }catch(err){
@@ -621,20 +692,66 @@ async function saveSnapshot(){
   }
 }
 
-async function loadHistory(){
-  let items=[];
+async function allSnaps(){
+  const items=[];
   try{
     const keys=await store.list('snap:');
     for(const k of keys){
-      try{const v=await store.get(k);if(v)items.push(JSON.parse(v));}catch(e){}
+      try{const v=await store.get(k);if(v){const it=JSON.parse(v);it._key=k;items.push(it);}}catch(e){}
     }
   }catch(err){}
   items.sort((a,b)=>a.date<b.date?-1:1);
-  renderHistory(items);
+  /* 新旧键并存时同一(市场,日期)去重 */
+  const seen=new Set();
+  return items.filter(it=>{
+    const k=(it.market||'us')+'|'+it.date;
+    if(seen.has(k))return false;
+    seen.add(k);return true;
+  });
 }
 
-async function delSnap(date){
-  try{await store.delete('snap:'+date);}catch(e){}
+async function loadHistory(){
+  const items=(await allSnaps()).filter(it=>(it.market||'us')===market);
+  renderHistory(items);
+  updatePersistence();
+}
+
+/* 铁律②落地：从快照历史统计红灯连续周数，提示"首次翻红须续验" */
+async function updatePersistence(){
+  const el=document.getElementById('vPersist');
+  if(!el)return;
+  const mine=(await allSnaps()).filter(it=>(it.market||'us')===market);
+  if(!mine.length){el.textContent='';return;}
+  let hotStreak=0,actStreak=0;
+  for(let i=mine.length-1;i>=0;i--){if(mine[i].condRed>=2)hotStreak++;else break;}
+  for(let i=mine.length-1;i>=0;i--){if(mine[i].trigRed>=2)actStreak++;else break;}
+  const parts=[];
+  if(hotStreak>0)parts.push(`条件层红灯已连续 <b style="color:var(--red)">${hotStreak}</b> 次快照${hotStreak<2?'（首次翻红，按铁律②需连续2-3周才算数）':''}`);
+  if(actStreak>0)parts.push(`扳机层已连续 <b style="color:var(--gold)">${actStreak}</b> 次快照`);
+  el.innerHTML='📎 留痕核验：'+(parts.length?parts.join(' · '):'近期快照无连续红灯，极端读数尚未获持续性确认');
+}
+
+/* 切换市场时清除自动指标的残留状态与注释，避免跨市场污染 */
+function resetAutoIndicators(){
+  ['bre','prc','vol'].forEach(id=>{
+    const ind=INDICATORS.find(i=>i.id===id);
+    state[id]=ind.def;
+    ind._note='';
+  });
+}
+
+/* 启动/切市场时载入该市场最近一次快照，恢复手动灯选择 */
+async function restoreLatest(){
+  const mine=(await allSnaps()).filter(it=>(it.market||'us')===market);
+  if(!mine.length)return;
+  const last=mine.at(-1);
+  Object.entries(last.states||{}).forEach(([id,v])=>{
+    if(state[id]!==undefined)state[id]=v;
+  });
+}
+
+async function delSnap(key){
+  try{await store.delete(key);}catch(e){}
   loadHistory();
 }
 
@@ -676,9 +793,9 @@ function renderHistory(items){
       <span class="d">${it.date}</span>
       <span style="color:var(--red)">条件 ${it.condRed}/4 红</span>
       <span style="color:var(--gold)">扳机 ${it.trigRed}/4 红</span>
-      <button class="x" data-d="${it.date}">×</button>
+      <button class="x" data-k="${it._key}">×</button>
     </div>`).join('');
-  host.querySelectorAll('.x').forEach(b=>b.addEventListener('click',()=>delSnap(b.dataset.d)));
+  host.querySelectorAll('.x').forEach(b=>b.addEventListener('click',()=>delSnap(b.dataset.k)));
 
   const W=800,H=140,pad=14;
   const n=items.length,maxY=4;
@@ -721,20 +838,27 @@ document.getElementById('saveFredKeyBtn').addEventListener('click',()=>{
 const _avk   = loadAvKey();   if (_avk)   document.getElementById('avKeyInput').value   = _avk;
 const _fredk = loadFredKey(); if (_fredk) document.getElementById('fredKeyInput').value = _fredk;
 
-/* market switch also triggers data refresh */
-document.getElementById('mkt').addEventListener('click',e=>{
+/* market switch: 先清残留 → 恢复该市场快照 → 重渲染 → 拉新数据 */
+document.getElementById('mkt').addEventListener('click',async e=>{
   if(e.target.tagName!=='BUTTON')return;
   market=e.target.dataset.m;
   document.querySelectorAll('#mkt button').forEach(b=>b.classList.toggle('on',b.dataset.m===market));
   document.getElementById('mktNote').textContent=MKT_NOTES[market];
+  resetAutoIndicators();
+  await restoreLatest();
   renderGrid();computeVerdict();
+  loadHistory();
   refreshData();
 });
 
-/* init */
+/* init: 恢复最近快照的手动灯 → 渲染 → 自动拉取覆盖 ⟳ 指标 */
 document.getElementById('mktNote').textContent=MKT_NOTES.us;
-renderGrid();computeVerdict();loadHistory();
-refreshData();
+renderGrid();computeVerdict();
+restoreLatest().then(()=>{
+  renderGrid();computeVerdict();
+  loadHistory();
+  refreshData();
+});
 </script>
 </body>
 </html>
