@@ -115,6 +115,12 @@
   .snap .x{cursor:pointer;color:var(--paper-faint);border:none;background:none;font-family:inherit;font-size:14px}
   .snap .x:hover{color:var(--red)}
   .empty{font-size:12px;color:var(--paper-faint);padding:14px 0;text-align:center}
+
+  /* toast */
+  .toast{position:fixed;bottom:24px;right:24px;background:var(--panel);border:1px solid var(--line);color:var(--paper);font-size:12px;padding:10px 16px;border-radius:10px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none;z-index:100}
+  .toast.show{opacity:1;transform:none}
+  .toast.err{border-color:var(--red);color:var(--red)}
+
   footer{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);font-size:11px;color:var(--paper-faint);line-height:1.7}
   footer b{color:var(--paper-dim);font-weight:500}
 </style>
@@ -184,9 +190,11 @@
 
   <footer>
     <b>三条铁律：</b>① 阈值是"区间"不是"线"；② 持续性 &gt; 单周读数（连续 2–3 周的极端才算数）；③ 单一绿灯别加杠杆,单一红灯别清仓。<br>
-    数据需你手动填入（来源见监测清单）。本面板只做判读与留痕,不替你做交易决定。快照存于本工具,清除聊天不影响。
+    数据需你手动填入（来源见监测清单）。本面板只做判读与留痕,不替你做交易决定。快照存于浏览器本地,清除聊天不影响。
   </footer>
 </div>
+
+<div id="toast" class="toast"></div>
 
 <script>
 const INDICATORS = [
@@ -275,6 +283,38 @@ INDICATORS.forEach(i=>state[i.id]=i.def);
 function optClass(k){return k==='red'?'r':k==='amber'?'a':'g'}
 function optText(ind,k){ const m=ind.mkt&&ind.mkt[market]&&ind.mkt[market][k]; return m||ind.opts[k]; }
 
+/* ---------- toast ---------- */
+function toast(msg, type='ok'){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.className='toast '+type+' show';
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>el.classList.remove('show'),2200);
+}
+
+/* ---------- storage abstraction (window.storage → localStorage fallback) ---------- */
+const store={
+  async set(k,v){
+    if(window.storage?.set){await window.storage.set(k,v,false);return;}
+    localStorage.setItem(k,v);
+  },
+  async get(k){
+    if(window.storage?.get){const r=await window.storage.get(k,false);return r?.value??null;}
+    return localStorage.getItem(k);
+  },
+  async list(prefix){
+    if(window.storage?.list){
+      const r=await window.storage.list(prefix,false);
+      return(r?.keys??[]).map(k=>typeof k==='string'?k:(k.key||k.name));
+    }
+    return Object.keys(localStorage).filter(k=>k.startsWith(prefix));
+  },
+  async delete(k){
+    if(window.storage?.delete){await window.storage.delete(k,false);return;}
+    localStorage.removeItem(k);
+  }
+};
+
 function renderGrid(){
   ['condition','trigger'].forEach(layer=>{
     const host=document.getElementById(layer==='condition'?'condGrid':'trigGrid');
@@ -330,7 +370,6 @@ function computeVerdict(){
     c.classList.toggle('danger',c.dataset.q===q&&danger);
   });
 
-  // partial-trigger watch hint
   if(hot&&trigRed===1){
     document.getElementById('vMove').innerHTML+=' <span style="color:var(--amber)">（扳机已亮 1 盏——进入观察,再亮 1 盏即行动。）</span>';
   }
@@ -346,40 +385,62 @@ document.getElementById('mkt').addEventListener('click',e=>{
   renderGrid();computeVerdict();
 });
 
-/* ---------- persistence (window.storage) ---------- */
-function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+/* ---------- persistence ---------- */
+function today(){return new Date().toLocaleDateString('sv');}
 
 async function saveSnapshot(){
   const {condRed,trigRed}=computeVerdict();
   const payload={date:today(),condRed,trigRed,states:{...state},market};
   try{
-    await window.storage.set('snap:'+payload.date, JSON.stringify(payload), false);
+    await store.set('snap:'+payload.date,JSON.stringify(payload));
     await loadHistory();
-  }catch(err){ alert('存储不可用（可能在预览环境）：'+err); }
+    toast('快照已保存 ✓');
+  }catch(err){
+    toast('存储失败：'+err,'err');
+  }
 }
+
 async function loadHistory(){
   let items=[];
   try{
-    const res=await window.storage.list('snap:',false);
-    const keys=(res&&res.keys)?res.keys:[];
+    const keys=await store.list('snap:');
     for(const k of keys){
-      const key=typeof k==='string'?k:(k.key||k.name);
-      try{const r=await window.storage.get(key,false); if(r&&r.value) items.push(JSON.parse(r.value));}catch(e){}
+      try{const v=await store.get(k);if(v)items.push(JSON.parse(v));}catch(e){}
     }
-  }catch(err){ /* storage unavailable */ }
+  }catch(err){}
   items.sort((a,b)=>a.date<b.date?-1:1);
   renderHistory(items);
 }
+
 async function delSnap(date){
-  try{await window.storage.delete('snap:'+date,false);}catch(e){}
+  try{await store.delete('snap:'+date);}catch(e){}
   loadHistory();
 }
+
+let clearPending=false;
 async function clearAll(){
-  if(!confirm('清空所有历史快照？'))return;
-  try{const res=await window.storage.list('snap:',false);const keys=(res&&res.keys)?res.keys:[];
-    for(const k of keys){const key=typeof k==='string'?k:(k.key||k.name);await window.storage.delete(key,false);}
+  const btn=document.getElementById('clearBtn');
+  if(!clearPending){
+    clearPending=true;
+    btn.textContent='再次点击确认';
+    btn.style.cssText='border-color:var(--red);color:var(--red)';
+    setTimeout(()=>{
+      if(!clearPending)return;
+      clearPending=false;
+      btn.textContent='清空';
+      btn.style.cssText='';
+    },3000);
+    return;
+  }
+  clearPending=false;
+  btn.textContent='清空';
+  btn.style.cssText='';
+  try{
+    const keys=await store.list('snap:');
+    for(const k of keys)await store.delete(k);
   }catch(e){}
   loadHistory();
+  toast('历史快照已清空');
 }
 
 function renderHistory(items){
@@ -398,9 +459,8 @@ function renderHistory(items){
     </div>`).join('');
   host.querySelectorAll('.x').forEach(b=>b.addEventListener('click',()=>delSnap(b.dataset.d)));
 
-  // sparkline
   const W=800,H=140,pad=14;
-  const n=items.length, maxY=4;
+  const n=items.length,maxY=4;
   const X=i=>n<=1?W/2:pad+i*(W-2*pad)/(n-1);
   const Y=v=>H-pad-(v/maxY)*(H-2*pad);
   const line=(arr,col)=>{
